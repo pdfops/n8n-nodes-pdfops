@@ -1,0 +1,18 @@
+{
+	"node": "n8n-nodes-pdfops",
+	"nodeVersion": "1.0",
+	"codexVersion": "1.0",
+	"categories": ["Development", "Utility"],
+	"resources": {
+		"credentialDocumentation": [
+			{
+				"url": "https://pdfops.dev/docs/signup"
+			}
+		],
+		"primaryDocumentation": [
+			{
+				"url": "https://github.com/pdfops/n8n-nodes-pdfops?tab=readme-ov-file"
+			}
+		]
+	}
+}

@@ -1,0 +1,57 @@
+{
+	"name": "n8n-nodes-pdfops",
+	"version": "0.1.0",
+	"description": "n8n community node for the PDFops API — deterministic PDF operations: inspect and fill AcroForm fields, merge PDFs, and generate invoice PDFs. Keyless free tier.",
+	"license": "MIT",
+	"homepage": "https://pdfops.dev",
+	"keywords": [
+		"n8n-community-node-package",
+		"pdf",
+		"acroform",
+		"fill-pdf",
+		"merge-pdf",
+		"invoice",
+		"pdfops"
+	],
+	"author": {
+		"name": "PDFops",
+		"email": "hello@pdfops.dev",
+		"url": "https://pdfops.dev"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/pdfops/n8n-nodes-pdfops.git"
+	},
+	"scripts": {
+		"build": "n8n-node build",
+		"build:watch": "tsc --watch",
+		"dev": "n8n-node dev",
+		"lint": "n8n-node lint",
+		"lint:fix": "n8n-node lint --fix",
+		"release": "n8n-node release",
+		"prepublishOnly": "n8n-node prerelease"
+	},
+	"files": [
+		"dist"
+	],
+	"n8n": {
+		"n8nNodesApiVersion": 1,
+		"strict": true,
+		"credentials": [
+			"dist/credentials/PdfopsApi.credentials.js"
+		],
+		"nodes": [
+			"dist/nodes/Pdfops/Pdfops.node.js"
+		]
+	},
+	"devDependencies": {
+		"@n8n/node-cli": "*",
+		"eslint": "9.32.0",
+		"prettier": "3.6.2",
+		"release-it": "^19.0.4",
+		"typescript": "5.9.2"
+	},
+	"peerDependencies": {
+		"n8n-workflow": "*"
+	}
+}
