@@ -60,6 +60,10 @@ on:
       # Matches 0.1.0, 1.2.3, 2.0.0-rc.1, etc.
       # See "TAG CONVENTION" above if you prefer tags with a "v" prefix.
       - '*.*.*'
+  # Manual fallback: the 0.1.1 tag pushes (2026-08-06) never produced a
+  # workflow run despite active workflows + enabled Actions — dispatch
+  # against the tag ref covers that failure mode.
+  workflow_dispatch:
 
 jobs:
   publish:
