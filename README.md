@@ -25,7 +25,7 @@ n8n community-node install n8n-nodes-pdfops
 | Operation | What it does |
 | --- | --- |
 | **Inspect Fields** | Lists a PDF's AcroForm fields — names, types, options, current values — plus a paste-ready fill template. Use it first on unfamiliar PDFs. |
-| **Fill Form** | Fills AcroForm fields in a PDF (from a binary field) and outputs the filled PDF as binary data. |
+| **Fill Form** | Fills AcroForm fields in a PDF (from a binary field) and outputs the filled PDF as binary data. Optionally **Flatten** the result to lock the values into the page (fields become non-interactive). |
 | **Merge** | Merges the PDFs from **all incoming items** (in item order) into a single output PDF. |
 | **Generate Invoice** | Turns structured JSON (from, to, items, tax, currency…) into a complete US-Letter invoice PDF — no template needed. |
 | **Get Usage** | Returns tier, quota, used, remaining, and reset date for your API key. |

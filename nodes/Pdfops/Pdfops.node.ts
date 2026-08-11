@@ -126,6 +126,19 @@ export class Pdfops implements INodeType {
 				},
 			},
 			{
+				displayName: 'Flatten',
+				name: 'flatten',
+				type: 'boolean',
+				default: false,
+				description:
+					'Whether to bake the filled values into the page so the fields are no longer interactive — useful for locking a form before sending or archiving. Off by default (the output stays an editable AcroForm).',
+				displayOptions: {
+					show: {
+						operation: ['fill'],
+					},
+				},
+			},
+			{
 				displayName: 'Output Binary Field',
 				name: 'outputBinaryPropertyName',
 				type: 'string',
@@ -275,6 +288,9 @@ export class Pdfops implements INodeType {
 					'input.pdf',
 				);
 				formData.append('fields', JSON.stringify(jsonParam('fields', i)));
+				if (this.getNodeParameter('flatten', i) as boolean) {
+					formData.append('flatten', 'true');
+				}
 				options = {
 					method: 'POST',
 					url: `${BASE_URL}/api/fill-form`,
