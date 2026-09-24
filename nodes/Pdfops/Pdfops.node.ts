@@ -18,6 +18,41 @@ import { NodeApiError, NodeConnectionTypes, NodeOperationError } from 'n8n-workf
 
 const BASE_URL = 'https://pdfops.dev';
 
+/** Sent as X-Pdfops-Client-Version — keep in step with n8n/package.json (asserted in tests). */
+const NODE_PACKAGE_VERSION = '0.2.1';
+
+/**
+ * Pull `{ error, details }` out of a failed PDFops response.
+ *
+ * The PDF-producing operations request `encoding: 'arraybuffer'`, so on a 4xx the
+ * AxiosError carries `response.data` as a Buffer. NodeApiError only mines
+ * `.message` from an object body, so without this the user sees nothing but
+ * "Request failed with status code 400" — even though the API said exactly which
+ * field was wrong.
+ */
+function decodeApiError(error: unknown): { message: string; details?: string } | undefined {
+	const raw = (error as { response?: { data?: unknown; body?: unknown } })?.response;
+	const payload = raw?.data ?? raw?.body;
+	if (payload === undefined || payload === null) return undefined;
+
+	let parsed: { error?: string; details?: string } | undefined;
+	if (typeof payload === 'object' && !Buffer.isBuffer(payload) && !(payload instanceof Uint8Array)) {
+		parsed = payload as { error?: string; details?: string };
+	} else {
+		const text = Buffer.isBuffer(payload)
+			? payload.toString('utf8')
+			: payload instanceof Uint8Array
+				? Buffer.from(payload).toString('utf8')
+				: String(payload);
+		try {
+			parsed = JSON.parse(text) as { error?: string; details?: string };
+		} catch {
+			return undefined;
+		}
+	}
+	return parsed?.error ? { message: parsed.error, details: parsed.details } : undefined;
+}
+
 export class Pdfops implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'PDFops',
@@ -179,7 +214,11 @@ export class Pdfops implements INodeType {
 		}
 
 		const request = async (options: IHttpRequestOptions): Promise<unknown> => {
-			options.headers = { ...options.headers, 'X-Pdfops-Client': 'n8n' };
+			options.headers = {
+				...options.headers,
+				'X-Pdfops-Client': 'n8n',
+				'X-Pdfops-Client-Version': NODE_PACKAGE_VERSION,
+			};
 			if (hasCredential) {
 				return await this.helpers.httpRequestWithAuthentication.call(this, 'pdfopsApi', options);
 			}
@@ -339,14 +378,25 @@ export class Pdfops implements INodeType {
 					returnData.push({ json: response as IDataObject, pairedItem: { item: i } });
 				}
 			} catch (error) {
+				// PDF-producing calls set encoding:'arraybuffer', so a 4xx body arrives
+				// as a Buffer and NodeApiError can only report "Request failed with
+				// status code 400". The API already names the offending field, so decode
+				// it — a mistyped AcroForm field name is the dominant user error here.
+				const apiError = decodeApiError(error);
 				if (this.continueOnFail()) {
 					returnData.push({
-						json: { error: (error as Error).message },
+						json: {
+							error: apiError?.message ?? (error as Error).message,
+							...(apiError?.details ? { details: apiError.details } : {}),
+						},
 						pairedItem: { item: i },
 					});
 					continue;
 				}
-				throw new NodeApiError(this.getNode(), error as JsonObject, { itemIndex: i });
+				throw new NodeApiError(this.getNode(), error as JsonObject, {
+					itemIndex: i,
+					...(apiError ? { message: apiError.message, description: apiError.details } : {}),
+				});
 			}
 		}
 

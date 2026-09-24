@@ -7,14 +7,17 @@ native dependencies; PDF processing runs on the hosted API.
 
 Works keyless out of the box (100 requests/IP/month). A free API key
 (250 requests/month, no card) raises the quota and unlocks usage
-introspection — get one at [pdfops.dev/pricing](https://pdfops.dev/pricing).
+introspection — get one in 60 seconds at
+[pdfops.dev/docs/signup#n8n](https://pdfops.dev/docs/signup#n8n), which also has
+a credentialed example workflow.
 
 ## Installation
 
-Community nodes install by npm package name. In n8n:
-**Settings → Community Nodes → Install** → `n8n-nodes-pdfops`.
+This community node is **verified by n8n** (listed in n8n's verified
+community-node registry since 2026-08-13).
 
-Self-hosted CLI alternative:
+**Self-hosted** — **Settings → Community Nodes → Install** →
+`n8n-nodes-pdfops`, or from the CLI:
 
 ```bash
 n8n community-node install n8n-nodes-pdfops

@@ -1,6 +1,6 @@
 {
 	"name": "n8n-nodes-pdfops",
-	"version": "0.2.0",
+	"version": "0.2.1",
 	"description": "n8n community node for the PDFops API — deterministic PDF operations: inspect and fill AcroForm fields, merge PDFs, and generate invoice PDFs. Keyless free tier.",
 	"license": "MIT",
 	"homepage": "https://pdfops.dev",
