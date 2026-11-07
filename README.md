@@ -16,12 +16,8 @@ a credentialed example workflow.
 This community node is **verified by n8n** (listed in n8n's verified
 community-node registry since 2026-08-13).
 
-**Self-hosted** — **Settings → Community Nodes → Install** →
-`n8n-nodes-pdfops`, or from the CLI:
-
-```bash
-n8n community-node install n8n-nodes-pdfops
-```
+Install it from **Settings → Community Nodes → Install** →
+`n8n-nodes-pdfops`.
 
 ## Operations
 

@@ -15,42 +15,28 @@ import type {
 	JsonObject,
 } from 'n8n-workflow';
 import { NodeApiError, NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
+import { decodeApiError } from './decodeApiError';
 
 const BASE_URL = 'https://pdfops.dev';
 
 /** Sent as X-Pdfops-Client-Version — keep in step with n8n/package.json (asserted in tests). */
-const NODE_PACKAGE_VERSION = '0.2.1';
+const NODE_PACKAGE_VERSION = '0.2.2';
 
 /**
- * Pull `{ error, details }` out of a failed PDFops response.
- *
- * The PDF-producing operations request `encoding: 'arraybuffer'`, so on a 4xx the
- * AxiosError carries `response.data` as a Buffer. NodeApiError only mines
- * `.message` from an object body, so without this the user sees nothing but
- * "Request failed with status code 400" — even though the API said exactly which
- * field was wrong.
+ * new NodeApiError(error) hands back an existing NodeApiError unchanged and ignores
+ * its options, so the decoded message has to be set on the result.
  */
-function decodeApiError(error: unknown): { message: string; details?: string } | undefined {
-	const raw = (error as { response?: { data?: unknown; body?: unknown } })?.response;
-	const payload = raw?.data ?? raw?.body;
-	if (payload === undefined || payload === null) return undefined;
-
-	let parsed: { error?: string; details?: string } | undefined;
-	if (typeof payload === 'object' && !Buffer.isBuffer(payload) && !(payload instanceof Uint8Array)) {
-		parsed = payload as { error?: string; details?: string };
-	} else {
-		const text = Buffer.isBuffer(payload)
-			? payload.toString('utf8')
-			: payload instanceof Uint8Array
-				? Buffer.from(payload).toString('utf8')
-				: String(payload);
-		try {
-			parsed = JSON.parse(text) as { error?: string; details?: string };
-		} catch {
-			return undefined;
-		}
+function withApiMessage(
+	wrapped: NodeApiError,
+	apiError: ReturnType<typeof decodeApiError>,
+	itemIndex?: number,
+): NodeApiError {
+	if (itemIndex !== undefined) wrapped.context = { ...wrapped.context, itemIndex };
+	if (apiError) {
+		wrapped.message = apiError.message;
+		wrapped.description = apiError.details ?? null;
 	}
-	return parsed?.error ? { message: parsed.error, details: parsed.details } : undefined;
+	return wrapped;
 }
 
 export class Pdfops implements INodeType {
@@ -206,12 +192,8 @@ export class Pdfops implements INodeType {
 		const returnData: INodeExecutionData[] = [];
 		const operation = this.getNodeParameter('operation', 0) as string;
 
-		let hasCredential = true;
-		try {
-			await this.getCredentials('pdfopsApi');
-		} catch {
-			hasCredential = false;
-		}
+		// A selected credential that fails to load must error, not silently go keyless.
+		const hasCredential = !!this.getNode().credentials?.pdfopsApi?.id;
 
 		const request = async (options: IHttpRequestOptions): Promise<unknown> => {
 			options.headers = {
@@ -255,8 +237,6 @@ export class Pdfops implements INodeType {
 
 		// Merge consumes ALL incoming items at once and emits a single item.
 		if (operation === 'merge') {
-			// Parameter and binary-data problems throw NodeOperationError before
-			// the API call; only transport/API failures reach the catch below.
 			const binaryPropertyName = this.getNodeParameter('binaryPropertyName', 0) as string;
 			const fileName = (this.getNodeParameter('fileName', 0) as string) || 'merged.pdf';
 			const outputBinaryPropertyName = this.getNodeParameter(
@@ -264,10 +244,10 @@ export class Pdfops implements INodeType {
 				0,
 			) as string;
 			const formData = new FormData();
-			for (let i = 0; i < items.length; i++) {
-				formData.append('pdf', await pdfBlob(i, binaryPropertyName), `input-${i}.pdf`);
-			}
 			try {
+				for (let i = 0; i < items.length; i++) {
+					formData.append('pdf', await pdfBlob(i, binaryPropertyName), `input-${i}.pdf`);
+				}
 				const response = (await request({
 					method: 'POST',
 					url: `${BASE_URL}/api/merge`,
@@ -286,13 +266,17 @@ export class Pdfops implements INodeType {
 					pairedItem: items.map((_, i) => ({ item: i })),
 				});
 			} catch (error) {
+				const apiError = decodeApiError(error);
 				if (this.continueOnFail()) {
 					returnData.push({
-						json: { error: (error as Error).message },
+						json: {
+							error: apiError?.message ?? (error as Error).message,
+							...(apiError?.details ? { message: apiError.details } : {}),
+						},
 						pairedItem: { item: 0 },
 					});
 				} else {
-					throw new NodeApiError(this.getNode(), error as JsonObject);
+					throw withApiMessage(new NodeApiError(this.getNode(), error as JsonObject), apiError);
 				}
 			}
 			return [returnData];
@@ -306,58 +290,65 @@ export class Pdfops implements INodeType {
 		}
 
 		for (let i = 0; i < items.length; i++) {
-			// Parameter and binary-data problems throw NodeOperationError here,
-			// before the API call; only transport/API failures reach the catch.
 			let options: IHttpRequestOptions;
 			let binaryOut: { fileName: string; property: string } | undefined;
 
-			if (operation === 'inspect') {
-				const formData = new FormData();
-				formData.append(
-					'pdf',
-					await pdfBlob(i, this.getNodeParameter('binaryPropertyName', i) as string),
-					'input.pdf',
-				);
-				options = { method: 'POST', url: `${BASE_URL}/api/inspect`, body: formData, json: true };
-			} else if (operation === 'fill') {
-				const formData = new FormData();
-				formData.append(
-					'pdf',
-					await pdfBlob(i, this.getNodeParameter('binaryPropertyName', i) as string),
-					'input.pdf',
-				);
-				formData.append('fields', JSON.stringify(jsonParam('fields', i)));
-				if (this.getNodeParameter('flatten', i) as boolean) {
-					formData.append('flatten', 'true');
+			try {
+				if (operation === 'inspect') {
+					const formData = new FormData();
+					formData.append(
+						'pdf',
+						await pdfBlob(i, this.getNodeParameter('binaryPropertyName', i) as string),
+						'input.pdf',
+					);
+					options = { method: 'POST', url: `${BASE_URL}/api/inspect`, body: formData, json: true };
+				} else if (operation === 'fill') {
+					const formData = new FormData();
+					formData.append(
+						'pdf',
+						await pdfBlob(i, this.getNodeParameter('binaryPropertyName', i) as string),
+						'input.pdf',
+					);
+					formData.append('fields', JSON.stringify(jsonParam('fields', i)));
+					if (this.getNodeParameter('flatten', i) as boolean) {
+						formData.append('flatten', 'true');
+					}
+					options = {
+						method: 'POST',
+						url: `${BASE_URL}/api/fill-form`,
+						body: formData,
+						encoding: 'arraybuffer',
+					};
+					binaryOut = {
+						fileName: (this.getNodeParameter('fileName', i) as string) || 'filled.pdf',
+						property: this.getNodeParameter('outputBinaryPropertyName', i) as string,
+					};
+				} else if (operation === 'invoice') {
+					options = {
+						method: 'POST',
+						url: `${BASE_URL}/api/invoice`,
+						body: jsonParam('invoice', i),
+						json: true,
+						encoding: 'arraybuffer',
+					};
+					binaryOut = {
+						fileName: (this.getNodeParameter('fileName', i) as string) || 'invoice.pdf',
+						property: this.getNodeParameter('outputBinaryPropertyName', i) as string,
+					};
+				} else if (operation === 'usage') {
+					options = { method: 'GET', url: `${BASE_URL}/api/usage`, json: true };
+				} else {
+					throw new NodeOperationError(this.getNode(), `Unknown operation "${operation}"`, {
+						itemIndex: i,
+					});
 				}
-				options = {
-					method: 'POST',
-					url: `${BASE_URL}/api/fill-form`,
-					body: formData,
-					encoding: 'arraybuffer',
-				};
-				binaryOut = {
-					fileName: (this.getNodeParameter('fileName', i) as string) || 'filled.pdf',
-					property: this.getNodeParameter('outputBinaryPropertyName', i) as string,
-				};
-			} else if (operation === 'invoice') {
-				options = {
-					method: 'POST',
-					url: `${BASE_URL}/api/invoice`,
-					body: jsonParam('invoice', i),
-					json: true,
-					encoding: 'arraybuffer',
-				};
-				binaryOut = {
-					fileName: (this.getNodeParameter('fileName', i) as string) || 'invoice.pdf',
-					property: this.getNodeParameter('outputBinaryPropertyName', i) as string,
-				};
-			} else if (operation === 'usage') {
-				options = { method: 'GET', url: `${BASE_URL}/api/usage`, json: true };
-			} else {
-				throw new NodeOperationError(this.getNode(), `Unknown operation "${operation}"`, {
-					itemIndex: i,
-				});
+			} catch (error) {
+				// One bad item must not throw away the items already done this run.
+				if (this.continueOnFail()) {
+					returnData.push({ json: { error: (error as Error).message }, pairedItem: { item: i } });
+					continue;
+				}
+				throw new NodeOperationError(this.getNode(), error as Error, { itemIndex: i });
 			}
 
 			try {
@@ -387,16 +378,17 @@ export class Pdfops implements INodeType {
 					returnData.push({
 						json: {
 							error: apiError?.message ?? (error as Error).message,
-							...(apiError?.details ? { details: apiError.details } : {}),
+							...(apiError?.details ? { message: apiError.details } : {}),
 						},
 						pairedItem: { item: i },
 					});
 					continue;
 				}
-				throw new NodeApiError(this.getNode(), error as JsonObject, {
-					itemIndex: i,
-					...(apiError ? { message: apiError.message, description: apiError.details } : {}),
-				});
+				throw withApiMessage(
+					new NodeApiError(this.getNode(), error as JsonObject, { itemIndex: i }),
+					apiError,
+					i,
+				);
 			}
 		}
 
