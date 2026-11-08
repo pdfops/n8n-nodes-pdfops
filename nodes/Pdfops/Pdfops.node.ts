@@ -20,7 +20,7 @@ import { decodeApiError } from './decodeApiError';
 const BASE_URL = 'https://pdfops.dev';
 
 /** Sent as X-Pdfops-Client-Version — keep in step with n8n/package.json (asserted in tests). */
-const NODE_PACKAGE_VERSION = '0.2.2';
+const NODE_PACKAGE_VERSION = '0.3.0';
 
 /**
  * new NodeApiError(error) hands back an existing NodeApiError unchanged and ignores
@@ -39,16 +39,32 @@ function withApiMessage(
 	return wrapped;
 }
 
+/** Page and document operations: all POST one `pdf` (+ optional `password`) as multipart. */
+const DOC_OPS: Record<string, { path: string; output: 'pdf' | 'json' | 'parts'; defaultFile: string }> = {
+	extractPages: { path: 'extract-pages', output: 'pdf', defaultFile: 'extracted.pdf' },
+	deletePages: { path: 'delete-pages', output: 'pdf', defaultFile: 'pages-deleted.pdf' },
+	rotate: { path: 'rotate', output: 'pdf', defaultFile: 'rotated.pdf' },
+	split: { path: 'split', output: 'parts', defaultFile: 'split' },
+	watermark: { path: 'watermark', output: 'pdf', defaultFile: 'watermarked.pdf' },
+	pageNumbers: { path: 'page-numbers', output: 'pdf', defaultFile: 'numbered.pdf' },
+	unlock: { path: 'unlock', output: 'pdf', defaultFile: 'unlocked.pdf' },
+	protect: { path: 'protect', output: 'pdf', defaultFile: 'protected.pdf' },
+	metadata: { path: 'metadata', output: 'json', defaultFile: '' },
+	setMetadata: { path: 'set-metadata', output: 'pdf', defaultFile: 'metadata-updated.pdf' },
+};
+
 export class Pdfops implements INodeType {
 	description: INodeTypeDescription = {
-		displayName: 'PDFops',
+		// Search in n8n's AI builder matches only name and displayName, by word start (TASK-391), so the
+		// jobs are in the name. defaults.name below keeps the canvas label short.
+		displayName: 'PDFops: Fill PDF Forms, Merge, Invoice',
 		name: 'pdfops',
 		icon: { light: 'file:pdfops.svg', dark: 'file:pdfops.dark.svg' },
 		group: ['transform'],
 		version: 1,
 		subtitle: '={{$parameter["operation"]}}',
 		description:
-			'Deterministic PDF operations via the PDFops API — inspect and fill AcroForm fields, merge PDFs, generate invoice PDFs',
+			'Fill, merge, split, rotate, watermark, number, protect, unlock and read PDFs and generate invoices. Works without an API key (100 calls/month).',
 		defaults: {
 			name: 'PDFops',
 		},
@@ -69,6 +85,34 @@ export class Pdfops implements INodeType {
 				noDataExpression: true,
 				options: [
 					{
+						name: 'Add Page Numbers',
+						value: 'pageNumbers',
+						action: 'Add page numbers to a PDF',
+						description:
+							'Stamp page numbers (for example "3 / 12") onto the pages of a PDF and output the numbered PDF',
+					},
+					{
+						name: 'Add Watermark',
+						value: 'watermark',
+						action: 'Add a text watermark to a PDF',
+						description:
+							'Stamp diagonal or horizontal text (DRAFT, CONFIDENTIAL, a name) over the pages of a PDF and output the watermarked PDF',
+					},
+					{
+						name: 'Delete Pages',
+						value: 'deletePages',
+						action: 'Delete pages from a PDF',
+						description:
+							'Remove the listed pages from a PDF and output the remaining pages in original order',
+					},
+					{
+						name: 'Extract Pages',
+						value: 'extractPages',
+						action: 'Extract pages from a PDF',
+						description:
+							'Keep only the listed pages of a PDF, in the order given, and output them as a new PDF (also reorders and duplicates pages)',
+					},
+					{
 						name: 'Fill Form',
 						value: 'fill',
 						action: 'Fill form fields in a PDF',
@@ -80,6 +124,13 @@ export class Pdfops implements INodeType {
 						action: 'Generate an invoice PDF',
 						description:
 							'Generate a complete invoice PDF from structured JSON — no template needed',
+					},
+					{
+						name: 'Get Metadata',
+						value: 'metadata',
+						action: 'Get PDF metadata',
+						description:
+							'Read page count, page sizes, title, author, dates, encryption and form-field count of a PDF as JSON',
 					},
 					{
 						name: 'Get Usage',
@@ -101,6 +152,40 @@ export class Pdfops implements INodeType {
 						description:
 							'Merge the PDFs from all incoming items (in item order) into a single PDF',
 					},
+					{
+						name: 'Protect PDF',
+						value: 'protect',
+						action: 'Password protect a PDF',
+						description:
+							'Encrypt a PDF with an open password and/or an owner password that restricts printing, copying and editing',
+					},
+					{
+						name: 'Rotate Pages',
+						value: 'rotate',
+						action: 'Rotate pages of a PDF',
+						description: 'Rotate all or selected pages of a PDF by 90, 180 or 270 degrees',
+					},
+					{
+						name: 'Set Metadata',
+						value: 'setMetadata',
+						action: 'Set PDF metadata',
+						description:
+							'Set the title, author, subject, keywords or creator of a PDF and output the updated PDF',
+					},
+					{
+						name: 'Split PDF',
+						value: 'split',
+						action: 'Split a PDF into several pdfs',
+						description:
+							'Split a PDF by page ranges or fixed chunk size; outputs one item per part, each with its own PDF binary',
+					},
+					{
+						name: 'Unlock PDF',
+						value: 'unlock',
+						action: 'Remove password protection from a PDF',
+						description:
+							'Remove encryption and print/copy/edit restrictions from a PDF you can already open (give the password if it needs one to open)',
+					},
 				],
 				default: 'fill',
 			},
@@ -113,7 +198,7 @@ export class Pdfops implements INodeType {
 				hint: 'The name of the input item’s binary field containing the PDF',
 				displayOptions: {
 					show: {
-						operation: ['fill', 'inspect', 'merge'],
+						operation: ['fill', 'inspect', 'merge', 'extractPages', 'deletePages', 'rotate', 'split', 'watermark', 'pageNumbers', 'unlock', 'protect', 'metadata', 'setMetadata'],
 					},
 				},
 			},
@@ -130,6 +215,303 @@ export class Pdfops implements INodeType {
 						operation: ['fill'],
 					},
 				},
+			},
+			{
+				displayName: 'Input PDF Password',
+				name: 'password',
+				type: 'string',
+				typeOptions: { password: true },
+				default: '',
+				description:
+					'Password needed to open the input PDF. Leave empty unless the input is encrypted with an open password.',
+				displayOptions: {
+					show: {
+						operation: [
+							'extractPages',
+							'deletePages',
+							'rotate',
+							'split',
+							'watermark',
+							'pageNumbers',
+							'unlock',
+							'protect',
+							'metadata',
+							'setMetadata',
+						],
+					},
+				},
+			},
+			{
+				displayName: 'Pages',
+				name: 'pages',
+				type: 'string',
+				default: '',
+				required: true,
+				placeholder: 'e.g. 1-3,5,8-',
+				description:
+					'1-based page spec: comma-separated pages and ranges, e.g. "1-3,5,8-" (8- means page 8 to the end). Keeps exactly these pages in the order given, so "3,1" reorders and "1,1" duplicates.',
+				displayOptions: { show: { operation: ['extractPages'] } },
+			},
+			{
+				displayName: 'Pages to Delete',
+				name: 'pages',
+				type: 'string',
+				default: '',
+				required: true,
+				placeholder: 'e.g. 2,4-6,9-',
+				description:
+					'1-based page spec of the pages to remove, e.g. "2,4-6,9-" (9- means page 9 to the end). Deleting every page is an error.',
+				displayOptions: { show: { operation: ['deletePages'] } },
+			},
+			{
+				displayName: 'Pages',
+				name: 'pages',
+				type: 'string',
+				default: '',
+				placeholder: 'e.g. 1-3,5 (empty = all pages)',
+				description: '1-based page spec such as "1-3,5". Leave empty to apply to every page.',
+				displayOptions: { show: { operation: ['rotate', 'watermark', 'pageNumbers'] } },
+			},
+			{
+				displayName: 'Degrees',
+				name: 'degrees',
+				type: 'options',
+				options: [
+					{ name: '90 (Clockwise)', value: 90 },
+					{ name: '180', value: 180 },
+					{ name: '270 (Clockwise)', value: 270 },
+					{ name: '-90 (Counter-Clockwise)', value: -90 },
+				],
+				default: 90,
+				description:
+					'How far to turn the pages clockwise. Added to each page’s existing rotation, so rotating a page already at 90 by 270 ends at 0.',
+				displayOptions: { show: { operation: ['rotate'] } },
+			},
+			{
+				displayName: 'Split By',
+				name: 'splitMode',
+				type: 'options',
+				options: [
+					{
+						name: 'Page Ranges',
+						value: 'ranges',
+						description: 'Each comma-separated group becomes one part, e.g. "1-2,3-5" gives two parts',
+					},
+					{
+						name: 'Chunk Size',
+						value: 'every',
+						description: 'Cut into parts of N pages each (the last part may be shorter)',
+					},
+				],
+				default: 'ranges',
+				displayOptions: { show: { operation: ['split'] } },
+			},
+			{
+				displayName: 'Ranges',
+				name: 'ranges',
+				type: 'string',
+				default: '',
+				required: true,
+				placeholder: 'e.g. 1-2,3-5',
+				description:
+					'1-based page ranges; every comma-separated group becomes its own part, e.g. "1-2,3-5" gives two PDFs and "1,2,3" gives three single-page PDFs',
+				displayOptions: { show: { operation: ['split'], splitMode: ['ranges'] } },
+			},
+			{
+				displayName: 'Pages per Part',
+				name: 'every',
+				type: 'number',
+				typeOptions: { minValue: 1 },
+				default: 1,
+				required: true,
+				description:
+					'Number of pages in each part; for example 2 on a 5-page PDF gives parts 1-2, 3-4 and 5',
+				displayOptions: { show: { operation: ['split'], splitMode: ['every'] } },
+			},
+			{
+				displayName: 'Watermark Text',
+				name: 'text',
+				type: 'string',
+				default: 'DRAFT',
+				required: true,
+				description:
+					'Text to stamp on the pages, at most 200 characters. Latin (WinAnsi) characters only; other scripts are rejected.',
+				displayOptions: { show: { operation: ['watermark'] } },
+			},
+			{
+				displayName: 'Watermark Options',
+				name: 'watermarkOptions',
+				type: 'collection',
+				placeholder: 'Add Option',
+				default: {},
+				displayOptions: { show: { operation: ['watermark'] } },
+				options: [
+					{
+						displayName: 'Color',
+						name: 'color',
+						type: 'color',
+						default: '#808080',
+						description: 'Text colour as hex, #rgb or #rrggbb',
+					},
+					{
+						displayName: 'Opacity',
+						name: 'opacity',
+						type: 'number',
+						typeOptions: { minValue: 0.05, maxValue: 1, numberPrecision: 2 },
+						default: 0.15,
+						description: 'From 0.05 (faint) to 1 (solid)',
+					},
+					{
+						displayName: 'Position',
+						name: 'position',
+						type: 'options',
+						options: [
+							{ name: 'Bottom', value: 'bottom' },
+							{ name: 'Center', value: 'center' },
+							{ name: 'Top', value: 'top' },
+						],
+						default: 'center',
+					},
+					{
+						displayName: 'Rotation',
+						name: 'rotation',
+						type: 'number',
+						default: 45,
+						description: 'Degrees counter-clockwise as the viewer sees it; 0 is horizontal',
+					},
+					{
+						displayName: 'Size',
+						name: 'size',
+						type: 'number',
+						typeOptions: { minValue: 6, maxValue: 200 },
+						default: 48,
+						description: 'Font size in points (6-200)',
+					},
+				],
+			},
+			{
+				displayName: 'Page Number Options',
+				name: 'pageNumberOptions',
+				type: 'collection',
+				placeholder: 'Add Option',
+				default: {},
+				displayOptions: { show: { operation: ['pageNumbers'] } },
+				options: [
+					{
+						displayName: 'Format',
+						name: 'format',
+						type: 'string',
+						default: '{n} / {total}',
+						description:
+							'Label template. {n} is the page number, {total} the page count of the document, e.g. "Page {n} of {total}". At most 100 Latin characters.',
+					},
+					{
+						displayName: 'Margin',
+						name: 'margin',
+						type: 'number',
+						typeOptions: { minValue: 0, maxValue: 200 },
+						default: 24,
+						description: 'Distance from the page edge in points (0-200)',
+					},
+					{
+						displayName: 'Position',
+						name: 'position',
+						type: 'options',
+						options: [
+							{ name: 'Bottom Center', value: 'bottom-center' },
+							{ name: 'Bottom Left', value: 'bottom-left' },
+							{ name: 'Bottom Right', value: 'bottom-right' },
+							{ name: 'Top Center', value: 'top-center' },
+							{ name: 'Top Left', value: 'top-left' },
+							{ name: 'Top Right', value: 'top-right' },
+						],
+						default: 'bottom-center',
+					},
+					{
+						displayName: 'Size',
+						name: 'size',
+						type: 'number',
+						typeOptions: { minValue: 4, maxValue: 72 },
+						default: 10,
+						description: 'Font size in points (4-72)',
+					},
+					{
+						displayName: 'Start Number',
+						name: 'start',
+						type: 'number',
+						typeOptions: { minValue: 0, maxValue: 100000 },
+						default: 1,
+						description:
+							'Number shown on page 1 of the document. Page i shows start+i-1, even when Pages selects only some pages.',
+					},
+				],
+			},
+			{
+				displayName: 'Open Password',
+				name: 'userPassword',
+				type: 'string',
+				typeOptions: { password: true },
+				default: '',
+				description:
+					'Password required to open the output PDF (at most 128 characters). Set this and/or the Owner Password; at least one is required.',
+				displayOptions: { show: { operation: ['protect'] } },
+			},
+			{
+				displayName: 'Owner Password',
+				name: 'ownerPassword',
+				type: 'string',
+				typeOptions: { password: true },
+				default: '',
+				description:
+					'Password that lifts the permission restrictions (at most 128 characters). Restrictions only bind a viewer when an owner password is set.',
+				displayOptions: { show: { operation: ['protect'] } },
+			},
+			{
+				displayName: 'Protect Options',
+				name: 'protectOptions',
+				type: 'collection',
+				placeholder: 'Add Option',
+				default: {},
+				displayOptions: { show: { operation: ['protect'] } },
+				options: [
+					{
+						displayName: 'Allowed Permissions',
+						name: 'permissions',
+						type: 'multiOptions',
+						options: [
+							{ name: 'Annotate', value: 'annotate' },
+							{ name: 'Copy', value: 'copy' },
+							{ name: 'Fill Forms', value: 'fill-forms' },
+							{ name: 'Modify', value: 'modify' },
+							{ name: 'Print', value: 'print' },
+						],
+						default: ['print', 'copy', 'annotate', 'fill-forms'],
+						description:
+							'What viewers may do. Leave this option out to allow everything (except modify when an owner password is set); select none to allow nothing.',
+					},
+				],
+			},
+			{
+				displayName: 'Metadata',
+				name: 'metadataFields',
+				type: 'collection',
+				placeholder: 'Add Field',
+				default: {},
+				description: 'At least one field is required; an empty value clears that field',
+				displayOptions: { show: { operation: ['setMetadata'] } },
+				options: [
+					{ displayName: 'Author', name: 'author', type: 'string', default: '' },
+					{ displayName: 'Creator', name: 'creator', type: 'string', default: '' },
+					{
+						displayName: 'Keywords',
+						name: 'keywords',
+						type: 'string',
+						default: '',
+						description: 'Comma-separated list',
+					},
+					{ displayName: 'Subject', name: 'subject', type: 'string', default: '' },
+					{ displayName: 'Title', name: 'title', type: 'string', default: '' },
+				],
 			},
 			{
 				displayName: 'Invoice',
@@ -167,7 +549,7 @@ export class Pdfops implements INodeType {
 				hint: 'The name of the output item’s binary field to write the resulting PDF to',
 				displayOptions: {
 					show: {
-						operation: ['fill', 'merge', 'invoice'],
+						operation: ['fill', 'merge', 'invoice', 'extractPages', 'deletePages', 'rotate', 'split', 'watermark', 'pageNumbers', 'unlock', 'protect', 'setMetadata'],
 					},
 				},
 			},
@@ -177,10 +559,11 @@ export class Pdfops implements INodeType {
 				type: 'string',
 				default: '',
 				placeholder: 'e.g. filled.pdf',
-				description: 'File name for the output PDF. Defaults per operation.',
+				description:
+					'File name for the output PDF. Defaults per operation. For Split PDF it is the prefix: parts are named prefix-1.pdf, prefix-2.pdf and so on',
 				displayOptions: {
 					show: {
-						operation: ['fill', 'merge', 'invoice'],
+						operation: ['fill', 'merge', 'invoice', 'extractPages', 'deletePages', 'rotate', 'split', 'watermark', 'pageNumbers', 'unlock', 'protect', 'setMetadata'],
 					},
 				},
 			},
@@ -292,6 +675,7 @@ export class Pdfops implements INodeType {
 		for (let i = 0; i < items.length; i++) {
 			let options: IHttpRequestOptions;
 			let binaryOut: { fileName: string; property: string } | undefined;
+			let splitOut = false;
 
 			try {
 				if (operation === 'inspect') {
@@ -335,6 +719,76 @@ export class Pdfops implements INodeType {
 						fileName: (this.getNodeParameter('fileName', i) as string) || 'invoice.pdf',
 						property: this.getNodeParameter('outputBinaryPropertyName', i) as string,
 					};
+				} else if (DOC_OPS[operation]) {
+					const spec = DOC_OPS[operation];
+					const formData = new FormData();
+					formData.append(
+						'pdf',
+						await pdfBlob(i, this.getNodeParameter('binaryPropertyName', i) as string),
+						'input.pdf',
+					);
+					const add = (name: string, value: unknown) => {
+						if (value !== undefined && value !== null && value !== '') {
+							formData.append(name, String(value));
+						}
+					};
+					add('password', this.getNodeParameter('password', i));
+					const collection = (name: string) => this.getNodeParameter(name, i, {}) as IDataObject;
+					if (operation === 'extractPages' || operation === 'deletePages') {
+						add('pages', this.getNodeParameter('pages', i));
+					} else if (operation === 'rotate') {
+						add('degrees', this.getNodeParameter('degrees', i));
+						add('pages', this.getNodeParameter('pages', i));
+					} else if (operation === 'split') {
+						const mode = this.getNodeParameter('splitMode', i) as string;
+						add(mode, this.getNodeParameter(mode, i));
+					} else if (operation === 'watermark') {
+						add('text', this.getNodeParameter('text', i));
+						add('pages', this.getNodeParameter('pages', i));
+						for (const [k, v] of Object.entries(collection('watermarkOptions'))) add(k, v);
+					} else if (operation === 'pageNumbers') {
+						add('pages', this.getNodeParameter('pages', i));
+						for (const [k, v] of Object.entries(collection('pageNumberOptions'))) add(k, v);
+					} else if (operation === 'protect') {
+						add('user_password', this.getNodeParameter('userPassword', i));
+						add('owner_password', this.getNodeParameter('ownerPassword', i));
+						const { permissions } = collection('protectOptions');
+						// An empty list is meaningful (allow nothing), so send it as an empty value.
+						if (Array.isArray(permissions)) formData.append('permissions', permissions.join(','));
+					} else if (operation === 'setMetadata') {
+						for (const [k, v] of Object.entries(collection('metadataFields'))) {
+							// An empty string is meaningful here (clears the field).
+							formData.append(k, String(v ?? ''));
+						}
+					}
+					if (spec.output === 'pdf') {
+						options = {
+							method: 'POST',
+							url: `${BASE_URL}/api/${spec.path}`,
+							body: formData,
+							encoding: 'arraybuffer',
+						};
+						binaryOut = {
+							fileName: (this.getNodeParameter('fileName', i) as string) || spec.defaultFile,
+							property: this.getNodeParameter('outputBinaryPropertyName', i) as string,
+						};
+					} else {
+						options = {
+							method: 'POST',
+							url: `${BASE_URL}/api/${spec.path}`,
+							body: formData,
+							json: true,
+						};
+						if (spec.output === 'parts') {
+							splitOut = true;
+							binaryOut = {
+								fileName: (
+									(this.getNodeParameter('fileName', i) as string) || spec.defaultFile
+								).replace(/\.pdf$/i, ''),
+								property: this.getNodeParameter('outputBinaryPropertyName', i) as string,
+							};
+						}
+					}
 				} else if (operation === 'usage') {
 					options = { method: 'GET', url: `${BASE_URL}/api/usage`, json: true };
 				} else {
@@ -352,13 +806,50 @@ export class Pdfops implements INodeType {
 			}
 
 			try {
+				if (binaryOut && !splitOut) options.returnFullResponse = true;
 				const response = await request(options);
-				if (binaryOut) {
+				if (splitOut && binaryOut) {
+					const parts = (
+						response as { parts?: Array<{ pages: string; page_count: number; pdf: string }> }
+					).parts;
+					if (!Array.isArray(parts)) {
+						throw new NodeOperationError(this.getNode(), 'Unexpected split response: no parts', {
+							itemIndex: i,
+						});
+					}
+					for (let n = 0; n < parts.length; n++) {
+						const name = `${binaryOut.fileName}-${n + 1}.pdf`;
+						returnData.push({
+							json: { pages: parts[n].pages, page_count: parts[n].page_count, part: n + 1 },
+							binary: {
+								[binaryOut.property]: await this.helpers.prepareBinaryData(
+									Buffer.from(parts[n].pdf, 'base64'),
+									name,
+									'application/pdf',
+								),
+							},
+							pairedItem: { item: i },
+						});
+					}
+				} else if (binaryOut) {
+					const full = response as { body: Buffer; headers?: Record<string, string> };
+					const json: IDataObject = { fileName: binaryOut.fileName };
+					// Fill Form: forgiving key matching reports what it resolved (non-exact keys only).
+					const fieldMap = full.headers?.['x-pdfops-field-map'];
+					if (fieldMap) {
+						try {
+							json.field_map = JSON.parse(fieldMap) as IDataObject;
+						} catch {
+							json.field_map = fieldMap;
+						}
+					}
+					const note = full.headers?.['x-pdfops-note'];
+					if (note) json.note = note;
 					returnData.push({
-						json: { fileName: binaryOut.fileName },
+						json,
 						binary: {
 							[binaryOut.property]: await this.helpers.prepareBinaryData(
-								response as Buffer,
+								full.body,
 								binaryOut.fileName,
 								'application/pdf',
 							),

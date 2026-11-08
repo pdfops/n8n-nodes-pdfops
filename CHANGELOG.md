@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.0
+
+- **Ten new operations**: Extract Pages, Delete Pages, Rotate Pages, Split PDF, Add Watermark,
+  Add Page Numbers, Unlock PDF, Protect PDF, Get Metadata, Set Metadata. Existing operations and
+  parameter names are unchanged.
+- **Split PDF emits one item per part**, each with its own PDF binary and JSON
+  `{ pages, page_count, part }`.
+- **Fill Form returns `field_map`** on the item JSON when the API matched any field name
+  non-exactly (`x-pdfops-field-map`). Unlock PDF returns `note` when the input was not encrypted.
+- New operations share the existing error handling: the API's own message is shown, and
+  Continue on Fail yields `{ error, message }` items.
+- Discovery: the node description now says what it does and that it works without an API key;
+  the codex file gains search aliases for every operation; README rewritten as a full listing.
+
 ## 0.2.2
 
 - **Show the API's real error when a credential is set.** Keyed requests fail as a
