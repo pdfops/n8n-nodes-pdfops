@@ -25,9 +25,9 @@ and set `fileName` on the item JSON.
 
 | Operation | What it does | Key parameters |
 | --- | --- | --- |
-| **Inspect Fields** | Lists a PDF's AcroForm fields (names, types, options, current values, optional `label`) plus a paste-ready fill template. Use it first on unfamiliar PDFs. | Input Binary Field |
-| **Fill Form** | Fills AcroForm fields and outputs the filled PDF. Field names are matched forgivingly; when a key was not an exact match, the item JSON carries `field_map` (`{ "what you sent": "field it resolved to" }`). | Fields (JSON object), Flatten |
-| **Merge** | Merges the PDFs from **all incoming items** (in item order) into one PDF. | Input Binary Field |
+| **Inspect Fields** | Lists a PDF's AcroForm fields (names, types, options, current values, optional `label`) plus a paste-ready fill template. Use it first on unfamiliar PDFs. | Input Binary Field, Input PDF Password |
+| **Fill Form** | Fills AcroForm fields and outputs the filled PDF. Field names are matched forgivingly; when a key was not an exact match, the item JSON carries `field_map` (`{ "what you sent": "field it resolved to" }`). | Fields (JSON object), Flatten, Input PDF Password |
+| **Merge** | Merges the PDFs from **all incoming items** (in item order) into one PDF. The Input PDF Password applies to every input. | Input Binary Field, Input PDF Password |
 | **Generate Invoice** | Turns structured JSON (from, to, items, tax, currency…) into a US-Letter invoice PDF, no template needed. | Invoice (JSON) |
 | **Extract Pages** | Keeps only the listed pages, in the order given (also reorders or duplicates pages). | Pages, e.g. `1-3,5,8-` |
 | **Delete Pages** | Removes the listed pages; the rest stay in order. Deleting every page is an error. | Pages to Delete, e.g. `2,4-6,9-` |
@@ -42,7 +42,7 @@ and set `fileName` on the item JSON.
 | **Get Usage** | Returns tier, quota, used, remaining and reset date for your API key (needs a credential). | - |
 
 Page specs are 1-based: comma-separated pages and ranges, `8-` meaning page 8
-to the end. All page and document operations accept an **Input PDF Password**
+to the end. All operations except Generate Invoice and Get Usage accept an **Input PDF Password**
 for inputs that need one to open. Output is deterministic (the same input gives
 a byte-identical PDF) for every operation except Protect PDF.
 

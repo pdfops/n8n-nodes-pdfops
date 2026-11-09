@@ -20,7 +20,7 @@ import { decodeApiError } from './decodeApiError';
 const BASE_URL = 'https://pdfops.dev';
 
 /** Sent as X-Pdfops-Client-Version — keep in step with n8n/package.json (asserted in tests). */
-const NODE_PACKAGE_VERSION = '0.3.0';
+const NODE_PACKAGE_VERSION = '0.3.1';
 
 /**
  * new NodeApiError(error) hands back an existing NodeApiError unchanged and ignores
@@ -227,6 +227,9 @@ export class Pdfops implements INodeType {
 				displayOptions: {
 					show: {
 						operation: [
+							'fill',
+							'inspect',
+							'merge',
 							'extractPages',
 							'deletePages',
 							'rotate',
@@ -631,6 +634,8 @@ export class Pdfops implements INodeType {
 				for (let i = 0; i < items.length; i++) {
 					formData.append('pdf', await pdfBlob(i, binaryPropertyName), `input-${i}.pdf`);
 				}
+				const mergePassword = this.getNodeParameter('password', 0) as string;
+				if (mergePassword) formData.append('password', mergePassword);
 				const response = (await request({
 					method: 'POST',
 					url: `${BASE_URL}/api/merge`,
@@ -685,6 +690,8 @@ export class Pdfops implements INodeType {
 						await pdfBlob(i, this.getNodeParameter('binaryPropertyName', i) as string),
 						'input.pdf',
 					);
+					const inspectPassword = this.getNodeParameter('password', i) as string;
+					if (inspectPassword) formData.append('password', inspectPassword);
 					options = { method: 'POST', url: `${BASE_URL}/api/inspect`, body: formData, json: true };
 				} else if (operation === 'fill') {
 					const formData = new FormData();
@@ -697,6 +704,8 @@ export class Pdfops implements INodeType {
 					if (this.getNodeParameter('flatten', i) as boolean) {
 						formData.append('flatten', 'true');
 					}
+					const fillPassword = this.getNodeParameter('password', i) as string;
+					if (fillPassword) formData.append('password', fillPassword);
 					options = {
 						method: 'POST',
 						url: `${BASE_URL}/api/fill-form`,

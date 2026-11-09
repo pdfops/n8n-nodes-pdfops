@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.1
+
+- **Input PDF Password on Fill Form, Inspect Fields and Merge PDFs.** The optional password
+  parameter already offered on the page and document operations now applies to the three original
+  operations too. Owner-locked PDFs (empty user password, common for government blanks) open
+  without it; a user-password PDF needs it. For Merge PDFs the password from the first item is
+  applied to every input.
+- Package description now names every operation (fill, merge, split, rotate, watermark, page
+  numbers, protect, unlock, metadata, inspect, invoices).
+
 ## 0.3.0
 
 - **Ten new operations**: Extract Pages, Delete Pages, Rotate Pages, Split PDF, Add Watermark,
