@@ -9,6 +9,7 @@ import type {
 	IExecuteFunctions,
 	IHttpRequestOptions,
 	INodeExecutionData,
+	INodeProperties,
 	INodeType,
 	INodeTypeDescription,
 	IDataObject,
@@ -20,7 +21,7 @@ import { decodeApiError } from './decodeApiError';
 const BASE_URL = 'https://pdfops.dev';
 
 /** Sent as X-Pdfops-Client-Version — keep in step with n8n/package.json (asserted in tests). */
-const NODE_PACKAGE_VERSION = '0.3.1';
+const NODE_PACKAGE_VERSION = '0.4.0';
 
 /**
  * new NodeApiError(error) hands back an existing NodeApiError unchanged and ignores
@@ -53,6 +54,251 @@ const DOC_OPS: Record<string, { path: string; output: 'pdf' | 'json' | 'parts'; 
 	setMetadata: { path: 'set-metadata', output: 'pdf', defaultFile: 'metadata-updated.pdf' },
 };
 
+// Version 1 is what n8n verified (0.2.1): five operations, no resources. Version 2 groups every
+// operation by resource, which n8n's scanner requires once a node has more than five. The lists are
+// written out literally on purpose: n8n's lint rules (and its verification scanner) read the source
+// statically and crash on option lists built from references. tests/n8n-node-operations.test.ts
+// keeps the v1 and v2 copies of each option in step.
+const OPERATION_PROPERTIES: INodeProperties[] = [
+	{
+		displayName: 'Operation',
+		name: 'operation',
+		type: 'options',
+		noDataExpression: true,
+		displayOptions: { show: { '@version': [1] } },
+		options: [
+			{
+				name: 'Fill Form',
+				value: 'fill',
+				action: 'Fill form fields in a PDF',
+				description:
+					'Fill AcroForm form fields in a PDF and output the filled PDF',
+			},
+			{
+				name: 'Generate Invoice',
+				value: 'invoice',
+				action: 'Generate an invoice PDF',
+				description:
+					'Generate a complete invoice PDF from structured JSON — no template needed',
+			},
+			{
+				name: 'Get Usage',
+				value: 'usage',
+				action: 'Get quota usage',
+				description:
+					'Check tier, limit, used, remaining, and reset date (requires an API key)',
+			},
+			{
+				name: 'Inspect Fields',
+				value: 'inspect',
+				action: 'List the form fields of a PDF',
+				description:
+					'List a PDF’s AcroForm fields — names, types, options, current values — plus a paste-ready fill template',
+			},
+			{
+				name: 'Merge',
+				value: 'merge',
+				action: 'Merge many PDF files into one',
+				description:
+					'Merge the PDFs from all incoming items (in item order) into a single PDF',
+			},
+		],
+		default: 'fill',
+	},
+	{
+		displayName: 'Resource',
+		name: 'resource',
+		type: 'options',
+		noDataExpression: true,
+		displayOptions: { show: { '@version': [2] } },
+		options: [
+			{ name: 'Account', value: 'account' },
+			{ name: 'Document', value: 'document' },
+			{ name: 'Form', value: 'form' },
+			{ name: 'Invoice', value: 'invoice' },
+			{ name: 'Metadata', value: 'metadata' },
+			{ name: 'Security', value: 'security' },
+			{ name: 'Stamp', value: 'stamp' },
+		],
+		default: 'form',
+	},
+	{
+		displayName: 'Operation',
+		name: 'operation',
+		type: 'options',
+		noDataExpression: true,
+		displayOptions: { show: { '@version': [2], resource: ['account'] } },
+		options: [
+			{
+				name: 'Get Usage',
+				value: 'usage',
+				action: 'Get quota usage',
+				description:
+					'Check tier, limit, used, remaining, and reset date (requires an API key)',
+			},
+		],
+		default: 'usage',
+	},
+	{
+		displayName: 'Operation',
+		name: 'operation',
+		type: 'options',
+		noDataExpression: true,
+		displayOptions: { show: { '@version': [2], resource: ['document'] } },
+		options: [
+			{
+				name: 'Delete Pages',
+				value: 'deletePages',
+				action: 'Delete pages from a PDF',
+				description:
+					'Remove the listed pages from a PDF and output the remaining pages in original order',
+			},
+			{
+				name: 'Extract Pages',
+				value: 'extractPages',
+				action: 'Extract pages from a PDF',
+				description:
+					'Keep only the listed pages of a PDF, in the order given, and output them as a new PDF (also reorders and duplicates pages)',
+			},
+			{
+				name: 'Merge',
+				value: 'merge',
+				action: 'Merge many PDF files into one',
+				description:
+					'Merge the PDFs from all incoming items (in item order) into a single PDF',
+			},
+			{
+				name: 'Rotate Pages',
+				value: 'rotate',
+				action: 'Rotate pages of a PDF',
+				description:
+					'Rotate all or selected pages of a PDF by 90, 180 or 270 degrees',
+			},
+			{
+				name: 'Split PDF',
+				value: 'split',
+				action: 'Split a PDF into several pdfs',
+				description:
+					'Split a PDF by page ranges or fixed chunk size; outputs one item per part, each with its own PDF binary',
+			},
+		],
+		default: 'merge',
+	},
+	{
+		displayName: 'Operation',
+		name: 'operation',
+		type: 'options',
+		noDataExpression: true,
+		displayOptions: { show: { '@version': [2], resource: ['form'] } },
+		options: [
+			{
+				name: 'Fill',
+				value: 'fill',
+				action: 'Fill form fields in a PDF',
+				description:
+					'Fill AcroForm form fields in a PDF and output the filled PDF',
+			},
+			{
+				name: 'Inspect Fields',
+				value: 'inspect',
+				action: 'List the form fields of a PDF',
+				description:
+					'List a PDF’s AcroForm fields — names, types, options, current values — plus a paste-ready fill template',
+			},
+		],
+		default: 'fill',
+	},
+	{
+		displayName: 'Operation',
+		name: 'operation',
+		type: 'options',
+		noDataExpression: true,
+		displayOptions: { show: { '@version': [2], resource: ['invoice'] } },
+		options: [
+			{
+				name: 'Generate',
+				value: 'invoice',
+				action: 'Generate an invoice PDF',
+				description:
+					'Generate a complete invoice PDF from structured JSON — no template needed',
+			},
+		],
+		default: 'invoice',
+	},
+	{
+		displayName: 'Operation',
+		name: 'operation',
+		type: 'options',
+		noDataExpression: true,
+		displayOptions: { show: { '@version': [2], resource: ['metadata'] } },
+		options: [
+			{
+				name: 'Get',
+				value: 'metadata',
+				action: 'Get PDF metadata',
+				description:
+					'Read page count, page sizes, title, author, dates, encryption and form-field count of a PDF as JSON',
+			},
+			{
+				name: 'Set',
+				value: 'setMetadata',
+				action: 'Set PDF metadata',
+				description:
+					'Set the title, author, subject, keywords or creator of a PDF and output the updated PDF',
+			},
+		],
+		default: 'metadata',
+	},
+	{
+		displayName: 'Operation',
+		name: 'operation',
+		type: 'options',
+		noDataExpression: true,
+		displayOptions: { show: { '@version': [2], resource: ['security'] } },
+		options: [
+			{
+				name: 'Protect',
+				value: 'protect',
+				action: 'Password protect a PDF',
+				description:
+					'Encrypt a PDF with an open password and/or an owner password that restricts printing, copying and editing',
+			},
+			{
+				name: 'Unlock',
+				value: 'unlock',
+				action: 'Remove password protection from a PDF',
+				description:
+					'Remove encryption and print/copy/edit restrictions from a PDF you can already open (give the password if it needs one to open)',
+			},
+		],
+		default: 'protect',
+	},
+	{
+		displayName: 'Operation',
+		name: 'operation',
+		type: 'options',
+		noDataExpression: true,
+		displayOptions: { show: { '@version': [2], resource: ['stamp'] } },
+		options: [
+			{
+				name: 'Add Page Numbers',
+				value: 'pageNumbers',
+				action: 'Add page numbers to a PDF',
+				description:
+					'Stamp page numbers (for example "3 / 12") onto the pages of a PDF and output the numbered PDF',
+			},
+			{
+				name: 'Add Watermark',
+				value: 'watermark',
+				action: 'Add a text watermark to a PDF',
+				description:
+					'Stamp diagonal or horizontal text (DRAFT, CONFIDENTIAL, a name) over the pages of a PDF and output the watermarked PDF',
+			},
+		],
+		default: 'watermark',
+	},
+];
+
 export class Pdfops implements INodeType {
 	description: INodeTypeDescription = {
 		// Search in n8n's AI builder matches only name and displayName, by word start (TASK-391), so the
@@ -61,8 +307,11 @@ export class Pdfops implements INodeType {
 		name: 'pdfops',
 		icon: { light: 'file:pdfops.svg', dark: 'file:pdfops.dark.svg' },
 		group: ['transform'],
-		version: 1,
-		subtitle: '={{$parameter["operation"]}}',
+		// 2 groups the operations under resources (n8n's resource-operation-pattern rule, an error in
+		// its verification scanner since 2026-10-13). 1 keeps the flat list so saved workflows still open.
+		version: [1, 2],
+		defaultVersion: 2,
+		subtitle: '={{ ($parameter["resource"] ? $parameter["resource"] + ": " : "") + $parameter["operation"] }}',
 		description:
 			'Fill, merge, split, rotate, watermark, number, protect, unlock and read PDFs and generate invoices. Works without an API key (100 calls/month).',
 		defaults: {
@@ -78,117 +327,7 @@ export class Pdfops implements INodeType {
 			},
 		],
 		properties: [
-			{
-				displayName: 'Operation',
-				name: 'operation',
-				type: 'options',
-				noDataExpression: true,
-				options: [
-					{
-						name: 'Add Page Numbers',
-						value: 'pageNumbers',
-						action: 'Add page numbers to a PDF',
-						description:
-							'Stamp page numbers (for example "3 / 12") onto the pages of a PDF and output the numbered PDF',
-					},
-					{
-						name: 'Add Watermark',
-						value: 'watermark',
-						action: 'Add a text watermark to a PDF',
-						description:
-							'Stamp diagonal or horizontal text (DRAFT, CONFIDENTIAL, a name) over the pages of a PDF and output the watermarked PDF',
-					},
-					{
-						name: 'Delete Pages',
-						value: 'deletePages',
-						action: 'Delete pages from a PDF',
-						description:
-							'Remove the listed pages from a PDF and output the remaining pages in original order',
-					},
-					{
-						name: 'Extract Pages',
-						value: 'extractPages',
-						action: 'Extract pages from a PDF',
-						description:
-							'Keep only the listed pages of a PDF, in the order given, and output them as a new PDF (also reorders and duplicates pages)',
-					},
-					{
-						name: 'Fill Form',
-						value: 'fill',
-						action: 'Fill form fields in a PDF',
-						description: 'Fill AcroForm form fields in a PDF and output the filled PDF',
-					},
-					{
-						name: 'Generate Invoice',
-						value: 'invoice',
-						action: 'Generate an invoice PDF',
-						description:
-							'Generate a complete invoice PDF from structured JSON — no template needed',
-					},
-					{
-						name: 'Get Metadata',
-						value: 'metadata',
-						action: 'Get PDF metadata',
-						description:
-							'Read page count, page sizes, title, author, dates, encryption and form-field count of a PDF as JSON',
-					},
-					{
-						name: 'Get Usage',
-						value: 'usage',
-						action: 'Get quota usage',
-						description: 'Check tier, limit, used, remaining, and reset date (requires an API key)',
-					},
-					{
-						name: 'Inspect Fields',
-						value: 'inspect',
-						action: 'List the form fields of a PDF',
-						description:
-							'List a PDF’s AcroForm fields — names, types, options, current values — plus a paste-ready fill template',
-					},
-					{
-						name: 'Merge',
-						value: 'merge',
-						action: 'Merge many PDF files into one',
-						description:
-							'Merge the PDFs from all incoming items (in item order) into a single PDF',
-					},
-					{
-						name: 'Protect PDF',
-						value: 'protect',
-						action: 'Password protect a PDF',
-						description:
-							'Encrypt a PDF with an open password and/or an owner password that restricts printing, copying and editing',
-					},
-					{
-						name: 'Rotate Pages',
-						value: 'rotate',
-						action: 'Rotate pages of a PDF',
-						description: 'Rotate all or selected pages of a PDF by 90, 180 or 270 degrees',
-					},
-					{
-						name: 'Set Metadata',
-						value: 'setMetadata',
-						action: 'Set PDF metadata',
-						description:
-							'Set the title, author, subject, keywords or creator of a PDF and output the updated PDF',
-					},
-					{
-						name: 'Split PDF',
-						value: 'split',
-						action: 'Split a PDF into several pdfs',
-						description:
-							'Split a PDF by page ranges or fixed chunk size; outputs one item per part, each with its own PDF binary',
-					},
-					{
-						name: 'Unlock PDF',
-						value: 'unlock',
-						action: 'Remove password protection from a PDF',
-						description:
-							'Remove encryption and print/copy/edit restrictions from a PDF you can already open (give the password if it needs one to open)',
-					},
-				],
-				default: 'fill',
-			},
+			...OPERATION_PROPERTIES,
 			{
 				displayName: 'Input Binary Field',
 				name: 'binaryPropertyName',

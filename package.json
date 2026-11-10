@@ -1,6 +1,6 @@
 {
 	"name": "n8n-nodes-pdfops",
-	"version": "0.3.1",
+	"version": "0.4.0",
 	"description": "n8n community node for the PDFops API: fill, merge, split, rotate, watermark and number PDFs, protect or unlock them, edit metadata, inspect fields and generate invoices. Keyless free tier.",
 	"license": "MIT",
 	"homepage": "https://pdfops.dev",
@@ -48,7 +48,7 @@
 		]
 	},
 	"devDependencies": {
-		"@n8n/node-cli": "*",
+		"@n8n/node-cli": "^0.56.1",
 		"eslint": "9.32.0",
 		"prettier": "3.6.2",
 		"release-it": "^19.0.4",

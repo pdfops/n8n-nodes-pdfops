@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.0
+
+- **Operations are grouped by resource** (node version 2): Form (Fill, Inspect Fields), Document
+  (Delete Pages, Extract Pages, Merge, Rotate Pages, Split PDF), Stamp (Add Page Numbers, Add
+  Watermark), Security (Protect, Unlock), Metadata (Get, Set), Invoice (Generate) and Account (Get
+  Usage). n8n's verification scanner requires resources once a node has more than five operations,
+  so 0.3.0 and 0.3.1 never passed n8n's review. Operation values and parameter names are unchanged.
+- **Workflows from 0.2.x keep working**: nodes saved on version 1 keep its five operations (Fill
+  Form, Inspect Fields, Merge, Generate Invoice, Get Usage). A version-1 node from 0.3.x that uses one
+  of the ten operations added in 0.3.0 needs replacing with a new PDFops node.
+
 ## 0.3.1
 
 - **Input PDF Password on Fill Form, Inspect Fields and Merge PDFs.** The optional password
