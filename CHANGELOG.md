@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.5.0
+
+- **Eight new operations**, grouped under resources so no operation list has more than five
+  options (the scanner rule behind the 0.3.x rejection): Form → Add Fields, Stamp → Edit,
+  Attachment → Attach, Text → Extract and Find, Convert → HTML to PDF, Images to PDF and Text to
+  PDF. Operation values are `addFields`, `edit`, `attach`, `extractText`, `findText`, `htmlToPdf`,
+  `imageToPdf` and `textToPdf`. Existing operations, values and parameter names are unchanged.
+- **Extract Text** reads the text layer as JSON, as plain text (`{ text, truncated }`), or, with
+  Tables As set to Excel Workbook (`tables_format=xlsx`), as binary data with the `.xlsx` mime type
+  and the file name you choose. Tables As CSV adds a `csv` string to each table. When a workbook is
+  cut short the item JSON carries `truncated`, `truncated_by` and `cells_truncated`.
+- **Generate Invoice gains Factur-X E-Invoice**: a switch that sends `e_invoice: "factur-x"`, plus an
+  E-Invoice Options collection (IBAN, Payment Terms, Tax Category, Tax Exemption Reason). The
+  structured `from` and `to` addresses (country, street, postcode, city, vat_id) and the item
+  `unit` go in the Invoice JSON, whose description now lists them.
+- **Images to PDF** merges the images from all incoming items into one PDF, like Merge does for
+  PDFs. **Attach Files** returns `attachment_keys` on the item JSON.
+- **Hardening**: requests never follow redirects (the credential header would otherwise travel to
+  another origin); Factur-X no longer writes into the Invoice object it was given; the Factur-X
+  switch is version 2 only, so version 1 stays as n8n verified it; an empty binary file name falls
+  back to the binary field name instead of dropping the file part; Edit rejects duplicate, empty and
+  odd Image File names (allowed: 1-64 of letters, digits, `_`, `.`, `-`) before any request; Images
+  to PDF honours Continue On Fail for parameter errors and pairs its error item with every input.
+- Response details are surfaced more carefully: `attachment_keys` only on Attach (always an array of
+  `{ name, key }`), truncation fields only on Extract, a non-workbook body on the workbook path is an
+  error, Add Fields returns `warning`, HTML to PDF returns `pages` and `blocked_requests`. Protect's
+  password help now says 1-32 characters (the API limit), and the Find Text and Factur-X help were
+  corrected.
+- Search aliases in the codex file for every new operation.
+- The mock harness (`harness/edgesuite.json`, `harness/edgesuite.py`) exercises the new operations,
+  including the binary outputs, in n8n against a mock of the API.
+
 ## 0.4.0
 
 - **Operations are grouped by resource** (node version 2): Form (Fill, Inspect Fields), Document
