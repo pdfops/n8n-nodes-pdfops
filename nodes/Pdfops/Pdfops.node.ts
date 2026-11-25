@@ -16,12 +16,12 @@ import type {
 	JsonObject,
 } from 'n8n-workflow';
 import { NodeApiError, NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
-import { decodeApiError } from './decodeApiError';
+import { decodeApiBody, decodeApiError } from './decodeApiError';
 
 const BASE_URL = 'https://pdfops.dev';
 
 /** Sent as X-Pdfops-Client-Version — keep in step with n8n/package.json (asserted in tests). */
-const NODE_PACKAGE_VERSION = '0.5.0';
+const NODE_PACKAGE_VERSION = '0.6.0';
 
 /** A response header counts as true when its first comma-separated token is "true". */
 function headerTrue(value: unknown): boolean {
@@ -62,6 +62,7 @@ const DOC_OPS: Record<string, { path: string; output: 'pdf' | 'json' | 'parts' |
 	edit: { path: 'edit', output: 'pdf', defaultFile: 'edited.pdf' },
 	extractText: { path: 'extract-text', output: 'extract', defaultFile: 'tables.xlsx' },
 	findText: { path: 'find-text', output: 'json', defaultFile: '' },
+	detectFields: { path: 'detect-fields', output: 'json', defaultFile: '' },
 };
 
 const XLSX_MIME_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -262,6 +263,13 @@ const OPERATION_PROPERTIES: INodeProperties[] = [
 					'Create fillable form fields (text, checkbox, radio group, dropdown, signature box) at exact positions in a PDF',
 			},
 			{
+				name: 'Detect Fields',
+				value: 'detectFields',
+				action: 'Detect fields on a flat PDF',
+				description:
+					'Suggest text and checkbox fields for a flat PDF as JSON: detects fields drawn as lines, boxes, underscores and checkboxes; review the result. Nothing is added to the PDF.',
+			},
+			{
 				name: 'Fill',
 				value: 'fill',
 				action: 'Fill form fields in a PDF',
@@ -274,6 +282,13 @@ const OPERATION_PROPERTIES: INodeProperties[] = [
 				action: 'List the form fields of a PDF',
 				description:
 					'List a PDF’s AcroForm fields — names, types, options, current values — plus a paste-ready fill template',
+			},
+			{
+				name: 'Make Fillable (Detect Fields)',
+				value: 'makeFillable',
+				action: 'Make a flat PDF fillable',
+				description:
+					'Detect fields on a flat PDF and add them: outputs the fillable PDF plus the field count and names. Long documents are handled in several calls (up to 25). Detects fields drawn as lines, boxes, underscores and checkboxes; review the result.',
 			},
 		],
 		default: 'fill',
@@ -438,7 +453,7 @@ export class Pdfops implements INodeType {
 				hint: 'The name of the input item’s binary field containing the PDF',
 				displayOptions: {
 					show: {
-						operation: ['fill', 'inspect', 'merge', 'extractPages', 'deletePages', 'rotate', 'split', 'watermark', 'pageNumbers', 'unlock', 'protect', 'metadata', 'setMetadata', 'addFields', 'attach', 'edit', 'extractText', 'findText'],
+						operation: ['fill', 'inspect', 'merge', 'extractPages', 'deletePages', 'rotate', 'split', 'watermark', 'pageNumbers', 'unlock', 'protect', 'metadata', 'setMetadata', 'addFields', 'attach', 'edit', 'extractText', 'findText', 'detectFields', 'makeFillable'],
 					},
 				},
 			},
@@ -494,6 +509,8 @@ export class Pdfops implements INodeType {
 							'edit',
 							'extractText',
 							'findText',
+							'detectFields',
+							'makeFillable',
 						],
 					},
 				},
@@ -528,6 +545,42 @@ export class Pdfops implements INodeType {
 				placeholder: 'e.g. 1-3,5 (empty = all pages)',
 				description: '1-based page spec such as "1-3,5". Leave empty to apply to every page.',
 				displayOptions: { show: { operation: ['rotate', 'watermark', 'pageNumbers', 'extractText', 'findText'] } },
+			},
+			{
+				displayName: 'Pages',
+				name: 'pages',
+				type: 'string',
+				default: '',
+				placeholder: 'e.g. 1-3,5 (empty = all pages)',
+				description:
+					'1-based page spec such as "1-3,5,8-". Leave empty to analyse every page (up to Max Pages). For Detect Fields, when the result says truncated, add the fields found, then run again on that PDF with Pages set to the next pages it lists. Make Fillable continues by itself.',
+				displayOptions: { show: { operation: ['detectFields', 'makeFillable'] } },
+			},
+			{
+				displayName: 'Detection Options',
+				name: 'detectOptions',
+				type: 'collection',
+				placeholder: 'Add Option',
+				default: {},
+				displayOptions: { show: { operation: ['detectFields', 'makeFillable'] } },
+				options: [
+					{
+						displayName: 'Max Pages',
+						name: 'max_pages',
+						type: 'number',
+						typeOptions: { minValue: 1, maxValue: 100 },
+						default: 40,
+						description: 'Analyse at most this many pages per call (1 to 100)',
+					},
+					{
+						displayName: 'Min Confidence',
+						name: 'min_confidence',
+						type: 'number',
+						typeOptions: { minValue: 0, maxValue: 1, numberPrecision: 2 },
+						default: 0.4,
+						description: 'Drop suggestions below this confidence (0 to 1). Higher gives fewer, surer fields.',
+					},
+				],
 			},
 			{
 				displayName: 'Degrees',
@@ -1276,7 +1329,7 @@ export class Pdfops implements INodeType {
 				hint: 'The name of the output item’s binary field to write the resulting PDF to',
 				displayOptions: {
 					show: {
-						operation: ['fill', 'merge', 'invoice', 'extractPages', 'deletePages', 'rotate', 'split', 'watermark', 'pageNumbers', 'unlock', 'protect', 'setMetadata', 'addFields', 'attach', 'edit', 'htmlToPdf', 'imageToPdf', 'textToPdf'],
+						operation: ['fill', 'merge', 'invoice', 'extractPages', 'deletePages', 'rotate', 'split', 'watermark', 'pageNumbers', 'unlock', 'protect', 'setMetadata', 'addFields', 'makeFillable', 'attach', 'edit', 'htmlToPdf', 'imageToPdf', 'textToPdf'],
 					},
 				},
 			},
@@ -1290,7 +1343,7 @@ export class Pdfops implements INodeType {
 					'File name for the output PDF. Defaults per operation. For Split PDF it is the prefix: parts are named prefix-1.pdf, prefix-2.pdf and so on',
 				displayOptions: {
 					show: {
-						operation: ['fill', 'merge', 'invoice', 'extractPages', 'deletePages', 'rotate', 'split', 'watermark', 'pageNumbers', 'unlock', 'protect', 'setMetadata', 'addFields', 'attach', 'edit', 'htmlToPdf', 'imageToPdf', 'textToPdf'],
+						operation: ['fill', 'merge', 'invoice', 'extractPages', 'deletePages', 'rotate', 'split', 'watermark', 'pageNumbers', 'unlock', 'protect', 'setMetadata', 'addFields', 'makeFillable', 'attach', 'edit', 'htmlToPdf', 'imageToPdf', 'textToPdf'],
 					},
 				},
 			},
@@ -1512,6 +1565,208 @@ export class Pdfops implements INodeType {
 			);
 		}
 
+		// Make Fillable runs the whole job per item: detection covers at most 40 pages and 200 fields per
+		// request, so it sends the result back with pages=<next pages> until nothing is left (bounded).
+		// Continuation rules (the same in the Python and JS SDKs and the n8n node):
+		//  - A round that adds fields or answers no_fields with nextPages goes on with those pages.
+		//  - The same pages offered again with nothing added is a stall (stop code 'stalled'); the
+		//    round limit is 'max_rounds'; a later-round API or network failure keeps its own code.
+		//  - A partial result is returned only if at least one field was added. With none, the item
+		//    fails: a later-round error as it is, a stall or the round limit as an error saying which
+		//    pages remain, and a final no_fields names the skipped pages.
+		//  - Only too_complex skips are final and accumulate; a deadline skip is offered again in
+		//    nextPages and is not "not analysed".
+		//  - A finished job (not truncated) has no truncated_by and no next_pages.
+		if (operation === 'makeFillable') {
+			const MAX_ROUNDS = 25;
+			for (let i = 0; i < items.length; i++) {
+				let apiMessage: ReturnType<typeof decodeApiError>;
+				try {
+					const binaryName = this.getNodeParameter('binaryPropertyName', i) as string;
+					this.helpers.assertBinaryData(i, binaryName);
+					let current: Buffer = Buffer.from(await this.helpers.getBinaryDataBuffer(i, binaryName));
+					const outProp = this.getNodeParameter('outputBinaryPropertyName', i) as string;
+					const fileName = (this.getNodeParameter('fileName', i) as string) || 'fillable.pdf';
+					const password = this.getNodeParameter('password', i) as string;
+					const detectOptions = this.getNodeParameter('detectOptions', i, {}) as IDataObject;
+					const firstPages = this.getNodeParameter('pages', i) as string;
+					let sendPages = firstPages;
+					let count = 0;
+					const names: string[] = [];
+					const skipped = new Set<number>();
+					let warning = '';
+					let truncated = false;
+					let truncatedBy = '';
+					let nextPages = '';
+					let rounds = 0;
+					let stoppedBy: { code: string; message: string } | undefined;
+					let stopError: unknown;
+					let lastNoFields: unknown;
+					let finished = false;
+					for (let round = 0; round < MAX_ROUNDS; round++) {
+						const formData = new FormData();
+						formData.append('pdf', new Blob([new Uint8Array(current)], { type: 'application/pdf' }), 'input.pdf');
+						formData.append('format', 'pdf');
+						if (password) formData.append('password', password);
+						if (sendPages) formData.append('pages', sendPages);
+						for (const [k, v] of Object.entries(detectOptions)) {
+							if (v !== undefined && v !== null && v !== '') formData.append(k, String(v));
+						}
+						let full: { body: Buffer; headers?: Record<string, string> };
+						try {
+							rounds++;
+							full = (await request({
+								method: 'POST',
+								url: `${BASE_URL}/api/detect-fields`,
+								body: formData,
+								encoding: 'arraybuffer',
+								returnFullResponse: true,
+							})) as { body: Buffer; headers?: Record<string, string> };
+						} catch (error) {
+							const body = decodeApiBody(error);
+							if (body?.error === 'no_fields') {
+								lastNoFields = error;
+								const sk = body.pagesSkipped;
+								if (Array.isArray(sk)) {
+									for (const x of sk) {
+										const y = x as { page?: unknown; reason?: unknown };
+										if (typeof y?.page === 'number' && y.reason === 'too_complex') skipped.add(y.page);
+									}
+								}
+								nextPages = typeof body.nextPages === 'string' ? body.nextPages : '';
+								truncated = body.truncated === true && nextPages !== '';
+								if (truncated && nextPages !== sendPages) {
+									sendPages = nextPages;
+									continue;
+								}
+								if (truncated) {
+									stoppedBy = { code: 'stalled', message: `pages ${nextPages} were offered again and nothing was found on them` };
+								}
+								finished = true;
+								break;
+							}
+							if (round === 0) {
+								throw withApiMessage(new NodeApiError(this.getNode(), error as JsonObject, { itemIndex: i }), decodeApiError(error), i);
+							}
+							const api = decodeApiError(error);
+							stopError = error;
+							stoppedBy = {
+								code: typeof body?.error === 'string' ? body.error : 'network_error',
+								message: api?.details ?? api?.message ?? (error as Error).message,
+							};
+							truncated = true;
+							nextPages = sendPages;
+							finished = true;
+							break;
+						}
+						lastNoFields = undefined;
+						const h = full.headers ?? {};
+						const n = h['x-pdfops-fields'];
+						const added = typeof n === 'string' && /^\d+$/.test(n) ? Number(n) : 0;
+						count += added;
+						try {
+							const parsed: unknown = JSON.parse(String(h['x-pdfops-field-names']));
+							if (Array.isArray(parsed)) names.push(...parsed.filter((x): x is string => typeof x === 'string'));
+						} catch {
+							// no names header: leave the list as it is
+						}
+						const skippedHeader = h['x-pdfops-pages-skipped'];
+						if (typeof skippedHeader === 'string') {
+							for (const p of skippedHeader.split(',')) if (/^\d+$/.test(p)) skipped.add(Number(p));
+						}
+						const w = h['x-pdfops-warning'];
+						if (!warning && typeof w === 'string' && w) warning = w;
+						truncatedBy = typeof h['x-pdfops-truncated-by'] === 'string' ? h['x-pdfops-truncated-by'] : '';
+						current = Buffer.from(full.body);
+						truncated = headerTrue(h['x-pdfops-truncated']);
+						nextPages = typeof h['x-pdfops-next-pages'] === 'string' ? h['x-pdfops-next-pages'] : '';
+						if (!truncated || !nextPages) {
+							finished = true;
+							break;
+						}
+						if (nextPages === sendPages && added === 0) {
+							stoppedBy = { code: 'stalled', message: `pages ${nextPages} were offered again and nothing new was found on them` };
+							finished = true;
+							break;
+						}
+						sendPages = nextPages;
+					}
+					if (!finished) {
+						truncated = true; // round limit reached with pages left
+						stoppedBy = { code: 'max_rounds', message: `stopped at the limit of ${MAX_ROUNDS} calls` };
+					}
+					if (!truncated) {
+						truncatedBy = '';
+						nextPages = '';
+					}
+					if (count === 0) {
+						const notAnalysed = skipped.size ? ` Pages not analysed: ${[...skipped].sort((a, b) => a - b).join(', ')} (too_complex).` : '';
+						if (stopError) {
+							const api = decodeApiError(stopError);
+							throw new NodeOperationError(
+								this.getNode(),
+								`${api?.message ?? (stopError as Error).message}${api?.details ? `: ${api.details}` : ''}${nextPages ? `; pages ${nextPages} remain` : ''}.${notAnalysed}`,
+								{ itemIndex: i },
+							);
+						}
+						if (stoppedBy) {
+							throw new NodeOperationError(
+								this.getNode(),
+								`No fields found in the pages analysed so far${nextPages ? `; pages ${nextPages} remain` : ''} (stopped: ${stoppedBy.code}). Run again with Pages set to ${nextPages || 'the pages not done'}.${notAnalysed}`,
+								{ itemIndex: i },
+							);
+						}
+						if (lastNoFields) {
+							if (skipped.size) {
+								const api = decodeApiError(lastNoFields);
+								throw new NodeOperationError(
+									this.getNode(),
+									`${api?.message ?? 'no_fields'}${api?.details ? `: ${api.details}` : ''} Pages not analysed: ${[...skipped].sort((a, b) => a - b).join(', ')} (too_complex).`,
+									{ itemIndex: i },
+								);
+							}
+							throw withApiMessage(new NodeApiError(this.getNode(), lastNoFields as JsonObject, { itemIndex: i }), decodeApiError(lastNoFields), i);
+						}
+					}
+					const json: IDataObject = {
+						fileName,
+						fields_count: count,
+						field_names: names,
+						truncated,
+						rounds,
+					};
+					if (truncatedBy) json.truncated_by = truncatedBy.split(',');
+					if (nextPages && truncated) json.next_pages = nextPages;
+					if (skipped.size) json.pages_skipped = [...skipped].sort((a, b) => a - b);
+					if (warning) json.warning = warning;
+					if (stoppedBy) {
+						json.stopped_by = stoppedBy;
+						json.message = `Stopped (${stoppedBy.code}) after ${rounds} call(s): ${stoppedBy.message}. The PDF holds the ${count} fields added so far; run again on it with Pages set to ${nextPages || 'the pages not done'} to finish.`;
+					}
+					returnData.push({
+						json,
+						binary: { [outProp]: await this.helpers.prepareBinaryData(current, fileName, 'application/pdf') },
+						pairedItem: { item: i },
+					});
+				} catch (error) {
+					apiMessage = decodeApiError(error);
+					if (this.continueOnFail()) {
+						returnData.push({
+							json: {
+								error: apiMessage?.message ?? (error as Error).message,
+								...(apiMessage?.details ? { message: apiMessage.details } : {}),
+							},
+							pairedItem: { item: i },
+						});
+						continue;
+					}
+					if (error instanceof NodeOperationError) throw new NodeOperationError(this.getNode(), error.message, { itemIndex: i });
+					throw withApiMessage(new NodeApiError(this.getNode(), error as JsonObject, { itemIndex: i }), apiMessage, i);
+				}
+			}
+			return [returnData];
+		}
+
 		for (let i = 0; i < items.length; i++) {
 			let options: IHttpRequestOptions;
 			let binaryOut: { fileName: string; property: string; mimeType?: string } | undefined;
@@ -1708,6 +1963,9 @@ export class Pdfops implements INodeType {
 						for (const [k, v] of Object.entries(collection('findOptions'))) add(k, v);
 					} else if (operation === 'extractText') {
 						add('pages', this.getNodeParameter('pages', i));
+					} else if (operation === 'detectFields') {
+						add('pages', this.getNodeParameter('pages', i));
+						for (const [k, v] of Object.entries(collection('detectOptions'))) add(k, v);
 					}
 					if (spec.output === 'extract') {
 						// tables_format=xlsx returns a workbook and needs format=json (the API's own rule).

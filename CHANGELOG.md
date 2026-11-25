@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.6.0
+
+- **Two new operations under Form**: Detect Fields (JSON only) and Make Fillable (Detect Fields),
+  for flat PDFs that have no form fields yet. They detect fields drawn as lines, boxes, underscores
+  and checkboxes; review the result. Operation values are `detectFields` and `makeFillable`.
+  Existing operations, values and parameter names are unchanged; Form now has five operations
+  (n8n's `resource-operation-pattern` lint rule only fires above five operations with no
+  resources; the per-list cap of five is this repo's own test, `tests/n8n-node-operations.test.ts`).
+- **Detect Fields** returns the API's JSON: `count`, `truncated`, `nextPages` and `fields[]`, each
+  entry valid input for Add Fields. **Make Fillable** returns the fillable PDF as binary data and
+  `fields_count`, `field_names`, `truncated`, `truncated_by`, `next_pages`, `pages_skipped` and
+  `warning` on the item JSON. Both take Pages and a Detection Options collection (Max Pages, Min
+  Confidence). Detect Fields returns one call's answer; when `truncated` is true, add the fields and
+  run again with Pages set to `nextPages`. **Make Fillable finishes the job itself**: it sends the
+  result back with the pages not done, up to 25 calls per item, continues past `no_fields` while
+  pages are left, keeps the first XFA `warning` and collects `pages_skipped`. When the loop ends
+  early you get a partial result (the PDF so far with `truncated` true, `next_pages`, `stopped_by`
+  = `{code, message}` and a `message`; code is `stalled`, `max_rounds` or the API error code of the
+  failed call) only if at least one field was added; otherwise the item fails with an error that
+  carries the stop code, the pages left and the too_complex pages skipped.
+
 ## 0.5.0
 
 - **Eight new operations**, grouped under resources so no operation list has more than five

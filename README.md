@@ -21,7 +21,7 @@ from **Settings → Community Nodes → Install** → `n8n-nodes-pdfops`.
 
 ## Operations
 
-Operations are grouped by resource: **Form** (Add Fields, Fill, Inspect Fields), **Document**
+Operations are grouped by resource: **Form** (Add Fields, Detect Fields, Fill, Inspect Fields, Make Fillable), **Document**
 (Delete Pages, Extract Pages, Merge, Rotate Pages, Split PDF), **Stamp** (Add Page Numbers, Add
 Watermark, Edit), **Text** (Extract, Find), **Attachment** (Attach), **Convert** (HTML to PDF,
 Images to PDF, Text to PDF), **Security** (Protect, Unlock), **Metadata** (Get, Set), **Invoice**
@@ -51,6 +51,8 @@ instead of a binary input.
 | **Metadata → Set** | Sets title, author, subject, keywords or creator and outputs the updated PDF. | Metadata fields (at least one) |
 | **Account → Get Usage** | Returns tier, quota, used, remaining and reset date for your API key (needs a credential). | - |
 | **Form → Add Fields** | Creates fillable AcroForm fields (text, multiline, checkbox, radio group, dropdown, signature box) at exact positions. The signature type is an empty field for a signing tool; nothing is signed. | Fields to Add (JSON array: type, name, page, x, y, width, height, options...), Input PDF Password |
+| **Form → Detect Fields** | Suggests text and checkbox fields for a flat PDF (no form fields yet) and returns them as JSON: `count`, `truncated`, `nextPages` and `fields` (type, name from the nearest printed label, page, x, y, width, height, label, confidence). Detects fields drawn as lines, boxes, underscores and checkboxes; review the result. The PDF is not changed. | Pages; options: Max Pages (default 40), Min Confidence (default 0.4), Input PDF Password |
+| **Form → Make Fillable (Detect Fields)** | Detects the fields and adds them in one call: outputs the fillable PDF as binary data, and the item JSON carries `fields_count`, `field_names`, `truncated`, `next_pages`, `pages_skipped` and `warning` when they apply. Nothing found is the error `no_fields`. Long documents are handled for you: the node sends the result back with the pages not done (up to 25 calls per item), continues past `no_fields` while pages are left, and reports `pages_skipped` and the first `warning`. When the loop ends early you get a partial result (the PDF so far with `truncated` true, `next_pages`, `stopped_by` = `{code, message}` and a `message`; code is `stalled`, `max_rounds` or the API error code of the failed call) only if at least one field was added, so you can resume; otherwise the item fails with an error that carries the stop code and the pages left. Review the result. | Pages; options: Max Pages, Min Confidence; Input PDF Password, Output Binary Field, Output File Name |
 | **Stamp → Edit** | Draws text, images (a logo, a signature picture), QR codes and barcodes at exact positions. x and y are PDF points from the bottom-left of the page as displayed. | Items (JSON array), Image Files (binary field plus the name Items refer to), Input PDF Password |
 | **Text → Extract** | Reads the text layer of a born-digital PDF (no OCR; scanned pages are listed in `pagesWithoutText`). JSON with per-page text, positioned lines and tables; Plain Text returns `{ text, truncated }`; Tables As Excel Workbook returns an `.xlsx` as binary data with its own mime type (one sheet per table) and fails with `no_tables` when the pages hold none. | Result Format (JSON, Plain Text), Tables As (JSON Rows, CSV, Excel Workbook), Pages, Output Binary Field and Output File Name (workbook) |
 | **Text → Find** | Searches the text layer for a word, phrase or regex and returns each hit with its page and box in the same coordinates Stamp → Edit uses. When `truncated` is true and `nextPage` is set, run again with Pages set to `<nextPage>-`. | Query; options: Case Sensitive, Max Hits (default 100), Regex, Whole Word; Pages |
@@ -63,7 +65,7 @@ Page specs are 1-based: comma-separated pages and ranges, `8-` meaning page 8
 to the end. All operations that read a PDF accept an **Input PDF Password** for inputs that need one to open.
 Output is deterministic (the same input gives a byte-identical PDF) for every PDF-producing
 operation except Security → Protect (salted encryption) and Convert → HTML to PDF (rendered by a
-browser, so two renders can differ in bytes). Extract Text and Find Text only read.
+browser, so two renders can differ in bytes). Extract Text, Find Text and Detect Fields only read.
 
 Errors carry the API's own message (for example which AcroForm field name was
 wrong). With **Continue on Fail** a failing item becomes `{ error, message }`

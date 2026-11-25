@@ -42,3 +42,24 @@ export function decodeApiError(error: unknown): { message: string; details?: str
 		? { message: parsed.error, details: typeof parsed.details === 'string' ? parsed.details : undefined }
 		: undefined;
 }
+
+/** The whole parsed JSON error body of a failed response (for keys beyond error and details), or undefined. */
+export function decodeApiBody(error: unknown): Record<string, unknown> | undefined {
+	const e = error as {
+		response?: { data?: unknown; body?: unknown };
+		cause?: { response?: { data?: unknown; body?: unknown } };
+		context?: { data?: unknown };
+	};
+	const payload =
+		e?.response?.data ?? e?.response?.body ?? e?.cause?.response?.data ?? e?.cause?.response?.body ?? e?.context?.data;
+	if (payload === undefined || payload === null) return undefined;
+	let parsed: unknown = payload;
+	if (Buffer.isBuffer(payload) || payload instanceof Uint8Array || typeof payload === 'string') {
+		try {
+			parsed = JSON.parse(Buffer.from(payload as Uint8Array | string).toString('utf8'));
+		} catch {
+			return undefined;
+		}
+	}
+	return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : undefined;
+}
